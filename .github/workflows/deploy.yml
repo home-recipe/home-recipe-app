@@ -1,0 +1,56 @@
+name: Flutter Web Deploy 
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    # 1. 최신 우분투 이미지인지 확인 (22.04 또는 24.04 권장)
+    runs-on: ubuntu-latest
+    
+    # 2. [가장 중요] 환경 변수 위치를 Job 레벨로 격상
+    # 이렇게 해야 'Cleaning up' 단계까지 Node.js 24가 강제 적용됩니다.
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v5
+
+      - name: 플러터 설정
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: 웹 빌드 시작
+        run: |
+          flutter pub get
+          flutter build web --wasm --release --base-href /
+
+      - name: 서버로 파일 전송 (SCP)
+        # v0.1.7 등 최신 태그를 사용 중인지 확인하세요.
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "build/web/*"
+          target: "/var/www/html"
+          strip_components: 2 
+
+      - name: 서버 정리 및 Nginx 재시작
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            if [ -d "/var/www/html/assets/assets" ]; then
+                sudo cp -r /var/www/html/assets/assets/* /var/www/html/assets/
+                sudo rm -rf /var/www/html/assets/assets
+            fi
+            sudo chown -R www-data:www-data /var/www/html
+            sudo chmod -R 755 /var/www/html
+            sudo systemctl restart nginx
+            echo "🚀 Node.js 24 강제 적용 및 배포 완료!"
